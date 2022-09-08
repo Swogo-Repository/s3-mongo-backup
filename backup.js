@@ -17,7 +17,7 @@ let BACKUP_PATH = (ZIP_NAME) => path.resolve(os.tmpdir(), ZIP_NAME);
 // Checks provided Configuration, Rejects if important keys from config are
 // missing
 function ValidateConfig(config) {
-    if (config && config.mongodb && config.s3 && config.s3.accessKey && config.s3.secretKey && config.s3.region && config.s3.bucketName) {
+    if (config && config.mongodb && config.s3 && config.s3.bucketName) {
         let mongodb;
         if (typeof config.mongodb == "string") {
             mongodb = MongodbURI.parse(config.mongodb);
@@ -57,20 +57,7 @@ function ValidateConfig(config) {
     return false;
 }
 
-function AWSSetup(config) {
-
-    AWS
-        .config
-        .update({
-            accessKeyId: config.s3.accessKey,
-            secretAccessKey: config.s3.secretKey,
-            region: config.s3.region
-        });
-
-    return new AWS.S3();
-}
-
-// Gets current time If Timezoneoffset is provided, then it'll get time in that
+// Gets current time If Timezone offset is provided, then it'll get time in that
 // time zone If no timezone is provided, then it gives UTC Time
 function currentTime(timezoneOffset) {
     if (timezoneOffset) {
@@ -86,7 +73,7 @@ function BackupMongoDatabase(config) {
 
     // Backups are stored in .tmp directory in Project root
     fs.mkdir(path.resolve(".tmp"), (err) => {
-        if (err && err.code != "EEXIST") {
+        if (err && err.code !== "EEXIST") {
             return Promise.reject(err);
         }
     });
@@ -104,7 +91,7 @@ function BackupMongoDatabase(config) {
 
         let DB_BACKUP_NAME = `${database}_${currentTime(timezoneOffset)}.gz`;
 
-        // Default command, does not considers username or password
+        // Default command, does not consider username or password
         let command = `mongodump -h ${host} --port=${port} -d ${database} --quiet --gzip --archive=${BACKUP_PATH(DB_BACKUP_NAME)}`;
 
         // When Username and password is provided
@@ -119,7 +106,7 @@ function BackupMongoDatabase(config) {
         if (ssl) command += ` --ssl`;
         if (authenticationDatabase) command += ` --authenticationDatabase=${authenticationDatabase}`;
 
-        exec(command, (err, stdout, stderr) => {
+        exec(command, (err) => {
             if (err) {
                 // Most likely, mongodump isn't installed or isn't accessible
                 reject({
@@ -215,7 +202,7 @@ function UploadFileToS3(S3, ZIP_NAME, config) {
 
             if (!config.keepLocalBackups) {
                 //  Not supposed to keep local backups, so delete the one that was just uploaded
-                DeleteLocalBackup(ZIP_NAME).then(deleteLocalBackupResult => {
+                DeleteLocalBackup(ZIP_NAME).then(() => {
                     resolve({
                         error: 0,
                         message: "Upload Successful, Deleted Local Copy of Backup",
@@ -259,14 +246,14 @@ function UploadFileToS3(S3, ZIP_NAME, config) {
 }
 
 function UploadBackup(config, backupResult) {
-    let s3 = AWSSetup(config);
+    let s3 = new AWS.S3();
 
     return UploadFileToS3(s3, backupResult.zipName, config).then(uploadFileResult => {
         return Promise.resolve(uploadFileResult);
     }, uploadFileError => {
         if (uploadFileError.code === "NoSuchBucket") {
-            // Bucket Does not exists, So Create one, And Reattempt to Upload
-            return CreateBucket(s3, config).then(createBucketResolved => {
+            // Bucket Does not exist, So Create one, And Reattempt to Upload
+            return CreateBucket(s3, config).then(() => {
                 return UploadFileToS3(s3, backupResult.zipName, config).then(uploadFileResult => {
                     return Promise.resolve(uploadFileResult);
                 }, uploadFileError => {
